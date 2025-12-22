@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8"/>
+<title>60333 曹侑曦 - 俄羅斯方塊 + 躲避下落方塊</title>
+<style>
+body{background:#94E8B4;font-family:"Microsoft JhengHei",Arial,sans-serif;margin:0;padding:20px;display:flex;flex-direction:column;align-items:center}
+h1{color:#cc00ff;margin:5px;text-align:center;text-shadow:1px 1px 2px rgba(0,0,0,.1)}
+.games-row{display:flex;gap:24px;flex-wrap:wrap;justify-content:center;width:100%;max-width:1080px;margin-top:10px}
+.game-card{background:linear-gradient(180deg,#fff,#f3f9f3);border-radius:12px;padding:12px;box-shadow:0 8px 30px rgba(0,0,0,.12);min-width:280px;display:flex;flex-direction:column;align-items:center}
+.game-title{font-size:18px;margin:6px 0;color:#333}
+#game-container,#dodge-container{position:relative;background:#333;border:5px solid #fff;box-shadow:0 0 20px rgba(0,0,0,.2);margin-top:10px}
+canvas{display:block;background:#000;border-radius:4px}
+.ui-panel{width:100%;text-align:center;margin-top:8px}
+.score-board{font-size:20px;font-weight:700;color:#444;margin-bottom:8px;background:#fff;padding:6px 12px;border-radius:16px;display:inline-block}
+.control-btns{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;max-width:260px;margin-top:10px}
+button{padding:8px 10px;font-size:14px;font-weight:700;cursor:pointer;border:none;border-radius:8px;background:#9BE564;color:#fff;box-shadow:0 4px #7CB342;transition:.15s}
+button:active{transform:translateY(2px);box-shadow:0 2px #7CB342}
+.pause-btn{background:#FFB347;box-shadow:0 4px #E69138}
+.reset-btn{background:#FF6B6B;grid-column:span 3;margin-top:6px;font-size:15px;box-shadow:0 4px #D32F2F}
+.pause-overlay{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:#fff;font-size:32px;font-weight:700;display:none;pointer-events:none;text-shadow:2px 2px 5px #000;background:rgba(0,0,0,.3);width:100%;text-align:center;padding:16px 0;border-radius:4px}
+.dodge-controls{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;justify-content:center}
+.hint{font-size:12px;color:#666;margin-top:6px}
+@media(max-width:860px){.games-row{flex-direction:column;align-items:center}}
+</style>
+</head>
+<body>
+<h1>6年3班 33號 — 曹侑曦</h1>
+<h1>俄羅斯方塊 + 躲避下落方塊</h1>
+
+<div class="games-row">
+  <div class="game-card">
+    <div class="game-title">俄羅斯方塊 (Tetris)</div>
+    <div class="ui-panel">
+      <div class="score-board" id="score">分數：0</div>
+      <div id="game-container">
+        <canvas id="tetris" width="240" height="400"></canvas>
+        <div id="pause-overlay" class="pause-overlay">遊戲暫停</div>
+      </div>
+      <div class="control-btns" style="margin-top:10px">
+        <button onclick="playerMove(-1)">左移</button>
+        <button onclick="playerRotate()">旋轉</button>
+        <button onclick="playerMove(1)">右移</button>
+        <button onclick="playerDrop()">下落</button>
+        <button class="pause-btn" id="pause-btn" onclick="togglePause()">⏸ 暫停</button>
+        <button onclick="playerDropFast()">瞬間落下</button>
+        <button class="reset-btn" onclick="resetGame()">🔄 重新開始遊戲</button>
+      </div>
+      <div class="hint">控制：← → ↓ ↑ / P 暫停</div>
+    </div>
+  </div>
+
+  <div class="game-card">
+    <div class="game-title">躲避下落方塊 (Dodge the Blocks)</div>
+    <div class="ui-panel">
+      <div class="score-board">分數: <span id="dodge-score">0</span></div>
+      <div style="display:flex;gap:12px;align-items:center;justify-content:center;margin-bottom:8px">
+        <div class="score-board" style="font-size:14px;padding:6px 10px;background:#fff">最高分: <span id="dodge-high">0</span></div>
+      </div>
+      <div id="dodge-container">
+        <canvas id="dodgeCanvas" width="360" height="480"></canvas>
+        <div id="dodge-overlay" class="pause-overlay">遊戲結束</div>
+      </div>
+      <div class="dodge-controls">
+        <button id="dodge-start">Start</button>
+        <button id="dodge-restart" style="display:none">Restart</button>
+        <button id="dodge-pause" class="pause-btn">⏸ 暫停</button>
+      </div>
+      <div class="hint">控制：A / D 或滑鼠/觸控移動</div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ===== TETRIS ===== */
+(function(){
+  const canvas=document.getElementById('tetris'), ctx=canvas.getContext('2d'), pauseOverlay=document.getElementById('pause-overlay');
+  ctx.scale(20,20);
+  const colors=[null,'#FF0D72','#0DC2FF','#0DFF72','#F538FF','#FF8E0D','#FFE138','#3877FF'];
+  const arena=Array.from({length:20},()=>Array(12).fill(0));
+  const player={pos:{x:0,y:0},matrix:null,score:0};
+  let paused=false, dropCounter=0, dropInterval=1000, lastTime=0;
+
+  function createPiece(t){
+    if(t==='I')return[[0,1,0,0],[0,1,0,0],[0,1,0,0],[0,1,0,0]];
+    if(t==='L')return[[0,2,0],[0,2,0],[0,2,2]];
+    if(t==='J')return[[0,3,0],[0,3,0],[3,3,0]];
+    if(t==='O')return[[4,4],[4,4]];
+    if(t==='Z')return[[5,5,0],[0,5,5],[0,0,0]];
+    if(t==='S')return[[0,6,6],[6,6,0],[0,0,0]];
+    if(t==='T')return[[0,7,0],[7,7,7],[0,0,0]];
+  }
+
+  function drawMatrix(m,off){
+    if(!m) return;
+    m.forEach((row,y)=>row.forEach((v,x)=>{ if(v){ ctx.fillStyle=colors[v]; ctx.fillRect(x+off.x,y+off.y,1,1); ctx.lineWidth=.05; ctx.strokeStyle='white'; ctx.strokeRect(x+off.x,y+off.y,1,1); } }));
+  }
+  function draw(){ ctx.fillStyle='#000'; ctx.fillRect(0,0,canvas.width,canvas.height); drawMatrix(arena,{x:0,y:0}); drawMatrix(player.matrix,player.pos); }
+
+  function collide(a,p){
+    const m=p.matrix,o=p.pos;
+    if(!m) return false;
+    for(let y=0;y<m.length;++y) for(let x=0;x<m[y].length;++x)
+      if(m[y][x]!==0){
+        const ay=y+o.y, ax=x+o.x;
+        // collision if outside arena or non-zero cell in arena
+        if(ay<0 || ay>=a.length || ax<0 || ax>=a[0].length) return true;
+        if(a[ay][ax]!==0) return true;
+      }
+    return false;
+  }
+
+  // safer merge (bounds-checked)
+  function merge(){
+    if(!player.matrix) return;
+    player.matrix.forEach((row,y)=>row.forEach((v,x)=>{ if(v){
+      const ay=y+player.pos.y, ax=x+player.pos.x;
+      if(ay>=0 && ay<arena.length && ax>=0 && ax<arena[0].length) arena[ay][ax]=v;
+    }}));
+  }
+
+  function rotate(m){ for(let y=0;y<m.length;++y) for(let x=0;x<y;++x)[m[x][y],m[y][x]]=[m[y][x],m[x][y]]; m.forEach(r=>r.reverse()); }
+
+  function arenaSweep(){
+    let rowCount=1;
+    outer: for(let y=arena.length-1;y>0;--y){
+      for(let x=0;x<arena[y].length;++x) if(arena[y][x]===0) continue outer;
+      const row=arena.splice(y,1)[0].fill(0); arena.unshift(row); ++y; player.score+=rowCount*10; rowCount*=2;
+    }
+    document.getElementById('score').innerText="分數："+player.score;
+  }
+
+  function playerDrop(){ if(paused) return; player.pos.y++; if(collide(arena,player)){ player.pos.y--; merge(); playerReset(); arenaSweep(); } dropCounter=0; }
+
+  // Robust instant drop: advance until collision, clamp, then merge safely.
+  function playerDropFast(){
+    if(paused) return;
+    if(!player.matrix) return;
+    // Move down until collision detected. Add safety cap.
+    let safety = 0;
+    while(!collide(arena,player) && safety < 100){
+      player.pos.y++;
+      safety++;
+    }
+    // If collided, step back to last valid row. If never collided, clamp to bottom.
+    if(collide(arena,player)) player.pos.y--;
+    else player.pos.y = Math.max(0, arena.length - player.matrix.length);
+    // Merge into arena (merge is bounds-checked)
+    merge();
+    playerReset();
+    arenaSweep();
+    dropCounter = 0;
+  }
+
+  function playerMove(dir){ if(paused) return; player.pos.x+=dir; if(collide(arena,player)) player.pos.x-=dir; }
+  function playerRotate(){ if(paused) return; const pos=player.pos.x; let offset=1; rotate(player.matrix); while(collide(arena,player)){ player.pos.x+=offset; offset=-(offset+(offset>0?1:-1)); if(Math.abs(offset)>player.matrix[0].length){ rotate(player.matrix); player.pos.x=pos; return; } } }
+
+  function playerReset(){
+    const pieces='ILJOTSZ';
+    player.matrix=createPiece(pieces[pieces.length*Math.random()|0]);
+    player.pos.y=0;
+    player.pos.x=(arena[0].length/2|0)-(player.matrix[0].length/2|0);
+    if(collide(arena,player)){
+      // game over: clear arena
+      arena.forEach(r=>r.fill(0));
+      player.score=0;
+      document.getElementById('score').innerText="分數："+player.score;
+    }
+  }
+
+  function togglePause(){ paused=!paused; pauseOverlay.style.display=paused?'block':'none'; document.getElementById('pause-btn').innerText=paused?'▶ 繼續':'⏸ 暫停'; }
+  function resetGame(){ arena.forEach(r=>r.fill(0)); player.score=0; paused=false; pauseOverlay.style.display='none'; document.getElementById('pause-btn').innerText='⏸ 暫停'; playerReset(); document.getElementById('score').innerText="分數："+player.score; }
+
+  function loop(time=0){
+    const delta = time - lastTime; lastTime = time;
+    if(!paused){ dropCounter += delta; if(dropCounter > dropInterval) playerDrop(); }
+    draw(); requestAnimationFrame(loop);
+  }
+
+  // keyboard controls
+  document.addEventListener('keydown', e=>{
+    if(e.key==='ArrowLeft') playerMove(-1);
+    else if(e.key==='ArrowRight') playerMove(1);
+    else if(e.key==='ArrowDown') playerDrop();
+    else if(e.key==='ArrowUp') playerRotate();
+    else if(e.key.toLowerCase()==='p') togglePause();
+  });
+
+  // expose functions for inline buttons
+  window.playerMove = playerMove;
+  window.playerRotate = playerRotate;
+  window.playerDrop = playerDrop;
+  window.playerDropFast = playerDropFast;
+  window.togglePause = togglePause;
+  window.resetGame = resetGame;
+
+  // init
+  playerReset(); document.getElementById('score').innerText="分數："+player.score; loop();
+})();
+
+/* ===== DODGE ===== */
+(function(){
+  const canvas=document.getElementById('dodgeCanvas'), ctx=canvas.getContext('2d');
+  const scoreEl=document.getElementById('dodge-score'), highEl=document.getElementById('dodge-high');
+  const startBtn=document.getElementById('dodge-start'), restartBtn=document.getElementById('dodge-restart'), pauseBtn=document.getElementById('dodge-pause'), overlay=document.getElementById('dodge-overlay');
+  const W=360,H=480; canvas.width=W; canvas.height=H;
+  const player={w:48,h:14,x:W/2-24,y:H-40,speed:360};
+  let keys={left:false,right:false}, pointerX=null, blocks=[], spawnTimer=0, spawnInterval=0.8, baseSpeed=120, score=0;
+  let high=parseInt(localStorage.getItem('dodge_high')||"0",10)||0; if(highEl) highEl.textContent=high;
+  let last=0, running=false, paused=false;
+
+  function resetGame(){ blocks=[]; spawnTimer=0; spawnInterval=0.8; baseSpeed=120; score=0; if(scoreEl) scoreEl.textContent='0'; player.x=W/2-player.w/2; last=0; overlay.style.display='none'; restartBtn.style.display='none'; startBtn.style.display='inline-block'; paused=false; }
+  function startGame(){ resetGame(); running=true; startBtn.style.display='none'; last=performance.now(); requestAnimationFrame(loop); }
+  function endGame(){ running=false; overlay.innerText='遊戲結束'; overlay.style.display='block'; restartBtn.style.display='inline-block'; startBtn.style.display='inline-block'; if(Math.floor(score)>high){ high=Math.floor(score); localStorage.setItem('dodge_high',high); if(highEl) highEl.textContent=high; } }
+
+  function spawnBlock(){ const s=18+Math.random()*36; const x=Math.random()*(W-s); const sp=baseSpeed+Math.random()*80; blocks.push({x,y:-s,size:s,speed:sp}); }
+  function update(dt){
+    if(keys.left) player.x-=player.speed*dt;
+    if(keys.right) player.x+=player.speed*dt;
+    if(pointerX!==null){ const tx=pointerX-player.w/2; player.x+=(tx-player.x)*Math.min(12*dt,1); }
+    player.x=Math.max(0,Math.min(W-player.w,player.x));
+    spawnTimer+=dt; if(spawnTimer>=spawnInterval){ spawnTimer=0; spawnBlock(); }
+    baseSpeed+=dt*2.5; spawnInterval=Math.max(0.25,spawnInterval-dt*0.006);
+    for(let i=blocks.length-1;i>=0;i--){ blocks[i].y+=blocks[i].speed*dt; if(blocks[i].y>H+blocks[i].size) blocks.splice(i,1); }
+    for(let b of blocks) if(b.x<player.x+player.w && b.x+b.size>player.x && b.y<player.y+player.h && b.y+b.size>player.y){ endGame(); return; }
+    score+=dt*10; if(scoreEl) scoreEl.textContent=Math.floor(score);
+  }
+  function draw(){ ctx.clearRect(0,0,W,H); ctx.fillStyle='#052733'; ctx.fillRect(0,0,W,H);
+    for(let b of blocks){ const g=ctx.createLinearGradient(b.x,b.y,b.x+b.size,b.y+b.size); g.addColorStop(0,'#ff7a7a'); g.addColorStop(1,'#ffcf6b'); ctx.fillStyle=g; roundRect(ctx,b.x,b.y,b.size,b.size,6,true,false); }
+    ctx.fillStyle='#00e3b0'; roundRect(ctx,player.x,player.y,player.w,player.h,4,true,false);
+    ctx.strokeStyle='rgba(255,255,255,0.04)'; ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(6,player.y+player.h+8); ctx.lineTo(W-6,player.y+player.h+8); ctx.stroke();
+  }
+  function loop(t){ if(!last) last=t; const dt=Math.min(0.05,(t-last)/1000); last=t; if(running && !paused){ update(dt); draw(); } if(running) requestAnimationFrame(loop); }
+  function roundRect(c,x,y,w,h,r,fill,stroke){ if(typeof r==='undefined') r=5; c.beginPath(); c.moveTo(x+r,y); c.arcTo(x+w,y,x+w,y+h,r); c.arcTo(x+w,y+h,x,y+h,r); c.arcTo(x,y+h,x,y,r); c.arcTo(x,y,x+w,y,r); c.closePath(); if(fill) c.fill(); if(stroke) c.stroke(); }
+
+  window.addEventListener('keydown',e=>{ if(e.key==='a'||e.key==='A') keys.left=true; if(e.key==='d'||e.key==='D') keys.right=true; });
+  window.addEventListener('keyup',e=>{ if(e.key==='a'||e.key==='A') keys.left=false; if(e.key==='d'||e.key==='D') keys.right=false; });
+
+  function getPointerX(e){ const r=canvas.getBoundingClientRect(); if(e.touches&&e.touches[0]) return (e.touches[0].clientX-r.left)*(W/r.width); return (e.clientX-r.left)*(W/r.width); }
+  canvas.addEventListener('mousemove',e=>pointerX=getPointerX(e));
+  canvas.addEventListener('touchmove',e=>{ pointerX=getPointerX(e); e.preventDefault(); },{passive:false});
+  canvas.addEventListener('mouseleave',()=>pointerX=null); canvas.addEventListener('touchend',()=>pointerX=null);
+
+  startBtn.addEventListener('click',startGame); restartBtn.addEventListener('click',startGame);
+  pauseBtn.addEventListener('click',()=>{ if(!running) return; paused=!paused; if(paused){ overlay.innerText='遊戲暫停'; overlay.style.display='block'; pauseBtn.innerText='▶ 繼續'; } else { overlay.style.display='none'; pauseBtn.innerText='⏸ 暫停'; } });
+
+  (function init(){ ctx.fillStyle='#071427'; ctx.fillRect(0,0,W,H); ctx.fillStyle='#9fbfcf'; ctx.font='18px sans-serif'; ctx.textAlign='center'; ctx.fillText('按 Start 開始躲避方塊',W/2,H/2-10); })();
+  resetGame(); window.resetDodgeGame = resetGame;
+})();
+</script>
+</body>
+</html>
